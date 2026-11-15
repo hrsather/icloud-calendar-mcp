@@ -1,3 +1,4 @@
+import logging
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -13,6 +14,9 @@ from caldav.lib import error as caldav_error
 
 from icloud_calendar_mcp import __version__
 from icloud_calendar_mcp.config import Settings
+
+# caldav logs diffs of event data (titles, attendees) on malformed iCalendar; keep that out of logs.
+logging.getLogger("caldav").setLevel(logging.CRITICAL)
 
 
 class CalendarError(Exception):

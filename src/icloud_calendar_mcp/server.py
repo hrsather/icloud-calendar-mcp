@@ -48,7 +48,7 @@ class BearerAuth:
 
 def build_server(settings: Settings, client: CalendarClient | None = None) -> MCPServer:
     client = client or CalendarClient(settings)
-    mcp = MCPServer("icloud-calendar", version=__version__)
+    mcp = MCPServer("icloud-calendar", version=__version__, log_level="WARNING")
 
     @mcp.tool()
     @_surface
