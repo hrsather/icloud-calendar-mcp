@@ -12,7 +12,8 @@ version, features and fixes bump the patch version.
 ### Fixed
 
 - Stop the `caldav` library from logging event titles and other event content when it repairs
-  malformed iCalendar data.
+  malformed iCalendar data, and run the server at log level WARNING so response bodies are not
+  logged at INFO.
 
 ## [0.1.0]
 
