@@ -112,7 +112,7 @@ The server speaks plain HTTP; put it behind TLS or keep it on a private network.
 | Tool | Description |
 | --- | --- |
 | `list_calendars` | Calendars that can hold events, with `id` and `name` |
-| `list_events(start, end, calendar?)` | Events in a range. `start`/`end` are ISO 8601; omit `calendar` (name or id) to search all. Recurring events are expanded into occurrences |
+| `list_events(start, end, calendar?)` | Events in a range. `start`/`end` are ISO 8601 (a date-only `end` is inclusive); omit `calendar` (name or id) to search all. Recurring events are expanded into occurrences |
 | `get_event(uid, calendar?)` | One event by UID. For a recurring event, the series and its `rrule` |
 | `create_event(calendar, summary, start, end?, location?, description?, rrule?)` | Create an event. A date-only `start` creates an all-day event; `end` defaults to +1 hour (or +1 day); `rrule` is e.g. `FREQ=WEEKLY;COUNT=4` |
 | `update_event(uid, calendar?, summary?, start?, end?, location?, description?)` | Change fields; omitted fields are untouched, `""` clears location or description. Changing only `start` keeps the duration |

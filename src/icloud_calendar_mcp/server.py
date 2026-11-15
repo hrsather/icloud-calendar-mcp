@@ -33,14 +33,15 @@ class BearerAuth:
         self._expected = f"Bearer {token}".encode()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http":
+        if scope["type"] != "lifespan":
             headers = dict(scope["headers"])
             supplied = headers.get(b"authorization", b"")
             if not hmac.compare_digest(supplied, self._expected):
-                response = PlainTextResponse(
-                    "unauthorized", status_code=401, headers={"WWW-Authenticate": "Bearer"}
-                )
-                await response(scope, receive, send)
+                if scope["type"] == "http":
+                    response = PlainTextResponse(
+                        "unauthorized", status_code=401, headers={"WWW-Authenticate": "Bearer"}
+                    )
+                    await response(scope, receive, send)
                 return
         await self._app(scope, receive, send)
 
@@ -59,8 +60,9 @@ def build_server(settings: Settings, client: CalendarClient | None = None) -> MC
     @_surface
     def list_events(start: str, end: str, calendar: str | None = None) -> list[dict[str, Any]]:
         """List events between start and end (ISO 8601 date or datetime; naive times use the
-        server's default timezone). Omit `calendar` (name or id) to search all calendars.
-        Recurring events are expanded into individual occurrences, each with the series UID."""
+        server's default timezone). A date-only `end` is inclusive. Omit `calendar` (name or id)
+        to search all calendars. Recurring events are expanded into individual occurrences, each
+        with the series UID."""
         return client.list_events(start, end, calendar)
 
     @mcp.tool()

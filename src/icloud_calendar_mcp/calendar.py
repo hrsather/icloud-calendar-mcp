@@ -1,4 +1,6 @@
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from typing import Any, cast
 from zoneinfo import ZoneInfo
@@ -15,6 +17,20 @@ from icloud_calendar_mcp.config import Settings
 
 class CalendarError(Exception):
     """Raised with a plain-string message that is safe to show to the model."""
+
+
+@contextmanager
+def _caldav() -> Iterator[None]:
+    try:
+        yield
+    except CalendarError:
+        raise
+    except caldav_error.AuthorizationError as exc:
+        raise CalendarError("authentication failed: check Apple ID and app password") from exc
+    except caldav_error.DAVError as exc:
+        raise CalendarError(f"CalDAV error: {exc.reason or type(exc).__name__}") from exc
+    except OSError as exc:
+        raise CalendarError(f"cannot reach CalDAV server: {type(exc).__name__}") from exc
 
 
 def parse_when(value: str, tz: ZoneInfo) -> date | datetime:
@@ -58,7 +74,7 @@ class CalendarClient:
 
     def _get_principal(self) -> Principal:
         if self._principal is None:
-            try:
+            with _caldav():
                 client = DAVClient(
                     url=self._settings.caldav_url,
                     username=self._settings.apple_id,
@@ -66,22 +82,12 @@ class CalendarClient:
                     require_tls=self._settings.caldav_url.startswith("https"),
                 )
                 self._principal = cast(Principal, client.principal())  # type: ignore[no-untyped-call]
-            except caldav_error.AuthorizationError as exc:
-                raise CalendarError(
-                    "authentication failed: check Apple ID and app password"
-                ) from exc
-            except caldav_error.DAVError as exc:
-                raise CalendarError(f"CalDAV error: {exc.reason or type(exc).__name__}") from exc
-            except Exception as exc:
-                raise CalendarError(f"cannot reach CalDAV server: {type(exc).__name__}") from exc
         return self._principal
 
     def _calendars(self) -> list[Calendar]:
-        try:
+        with _caldav():
             found = cast(list[Calendar], self._get_principal().calendars())
-            return [c for c in found if self._supports_events(c)]
-        except caldav_error.DAVError as exc:
-            raise CalendarError(f"CalDAV error: {exc.reason or type(exc).__name__}") from exc
+        return [c for c in found if self._supports_events(c)]
 
     @staticmethod
     def _supports_events(calendar: Calendar) -> bool:
@@ -105,11 +111,11 @@ class CalendarClient:
     def _find(self, uid: str, calendar: str | None) -> tuple[Calendar, Any]:
         for cal in self._resolve(calendar):
             try:
-                return cal, cal.event_by_uid(uid)
-            except caldav_error.NotFoundError:
-                continue
-            except caldav_error.DAVError as exc:
-                raise CalendarError(f"CalDAV error: {exc.reason or type(exc).__name__}") from exc
+                with _caldav():
+                    return cal, cal.event_by_uid(uid)
+            except CalendarError as exc:
+                if not isinstance(exc.__cause__, caldav_error.NotFoundError):
+                    raise
         raise CalendarError(f"event not found: {uid!r}")
 
     def _event_dict(self, calendar: Calendar, component: Any) -> dict[str, Any]:
@@ -143,28 +149,32 @@ class CalendarClient:
         self, start: str, end: str, calendar: str | None = None
     ) -> list[dict[str, Any]]:
         start_dt = _as_datetime(parse_when(start, self._tz), self._tz)
-        end_dt = _as_datetime(parse_when(end, self._tz), self._tz)
+        end_value = parse_when(end, self._tz)
+        if not isinstance(end_value, datetime):
+            end_value += timedelta(days=1)
+        end_dt = _as_datetime(end_value, self._tz)
         if end_dt <= start_dt:
             raise CalendarError("end must be after start")
         events: list[dict[str, Any]] = []
         for cal in self._resolve(calendar):
-            try:
+            with _caldav():
                 found = cast(
                     list[Event], cal.search(start=start_dt, end=end_dt, event=True, expand=True)
                 )
-            except caldav_error.DAVError as exc:
-                raise CalendarError(f"CalDAV error: {exc.reason or type(exc).__name__}") from exc
             for obj in found:
                 for component in obj.icalendar_instance.walk("VEVENT"):
                     events.append(self._event_dict(cal, component))
         events.sort(key=lambda e: (e["start"], e["uid"]))
         return events
 
+    @staticmethod
+    def _master(obj: Any) -> Any:
+        components = list(obj.icalendar_instance.walk("VEVENT"))
+        return next((c for c in components if "RECURRENCE-ID" not in c), components[0])
+
     def get_event(self, uid: str, calendar: str | None = None) -> dict[str, Any]:
         cal, obj = self._find(uid, calendar)
-        components = [c for c in obj.icalendar_instance.walk("VEVENT") if "RECURRENCE-ID" not in c]
-        component = components[0] if components else obj.icalendar_component
-        return self._event_dict(cal, component)
+        return self._event_dict(cal, self._master(obj))
 
     def create_event(
         self,
@@ -201,7 +211,10 @@ class CalendarClient:
         if description:
             event.add("description", description)
         if rrule:
-            parsed = icalendar.vRecur.from_ical(rrule)
+            try:
+                parsed = icalendar.vRecur.from_ical(rrule.removeprefix("RRULE:"))
+            except ValueError as exc:
+                raise CalendarError(f"invalid RRULE: {rrule!r}") from exc
             if "FREQ" not in parsed:
                 raise CalendarError(f"invalid RRULE: {rrule!r}")
             event.add("rrule", parsed)
@@ -209,18 +222,17 @@ class CalendarClient:
         ical.add("prodid", f"-//icloud-calendar-mcp//{__version__}//EN")
         ical.add("version", "2.0")
         ical.add_component(event)
-        try:
+        ical.add_missing_timezones()
+        with _caldav():
             cal.save_event(ical.to_ical().decode())
-        except caldav_error.DAVError as exc:
-            raise CalendarError(f"CalDAV error: {exc.reason or type(exc).__name__}") from exc
         return self.get_event(uid, calendar)
 
     def _set_times(self, component: Any, start: date | datetime, end: date | datetime) -> None:
         for key in ("DTSTART", "DTEND", "DURATION"):
             component.pop(key, None)
         if isinstance(start, datetime):
-            start = start.astimezone(ZoneInfo("UTC"))
-            end = _as_datetime(end, self._tz).astimezone(ZoneInfo("UTC"))
+            start = start.astimezone(self._tz)
+            end = _as_datetime(end, self._tz).astimezone(self._tz)
         component.add("dtstart", start)
         component.add("dtend", end)
 
@@ -235,7 +247,7 @@ class CalendarClient:
         description: str | None = None,
     ) -> dict[str, Any]:
         cal, obj = self._find(uid, calendar)
-        component = obj.icalendar_component
+        component = self._master(obj)
         if summary is not None:
             component["SUMMARY"] = summary
         if location is not None:
@@ -247,6 +259,13 @@ class CalendarClient:
             if description:
                 component.add("description", description)
         if start is not None or end is not None:
+            if any(
+                "RECURRENCE-ID" in c or "EXDATE" in c for c in obj.icalendar_instance.walk("VEVENT")
+            ):
+                raise CalendarError(
+                    "cannot change the time of a recurring event that has modified or "
+                    "excluded occurrences"
+                )
             current = self._event_dict(cal, component)
             start_value = parse_when(start or current["start"], self._tz)
             end_value: date | datetime
@@ -264,16 +283,13 @@ class CalendarClient:
             if _as_datetime(end_value, self._tz) <= _as_datetime(start_value, self._tz):
                 raise CalendarError("end must be after start")
             self._set_times(component, start_value, end_value)
-        try:
+        obj.icalendar_instance.add_missing_timezones()
+        with _caldav():
             obj.save()
-        except caldav_error.DAVError as exc:
-            raise CalendarError(f"CalDAV error: {exc.reason or type(exc).__name__}") from exc
         return self.get_event(uid, calendar)
 
     def delete_event(self, uid: str, calendar: str | None = None) -> dict[str, str]:
         _, obj = self._find(uid, calendar)
-        try:
+        with _caldav():
             obj.delete()
-        except caldav_error.DAVError as exc:
-            raise CalendarError(f"CalDAV error: {exc.reason or type(exc).__name__}") from exc
         return {"deleted": uid}

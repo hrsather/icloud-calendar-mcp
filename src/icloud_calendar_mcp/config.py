@@ -22,6 +22,15 @@ def _read(env: Mapping[str, str], name: str) -> str | None:
     return value.strip() if value else None
 
 
+def _flag(env: Mapping[str, str], name: str) -> bool:
+    value = env.get(name, "").strip().lower()
+    if value in {"1", "true", "yes"}:
+        return True
+    if value in {"", "0", "false", "no"}:
+        return False
+    raise ConfigError(f"{name} must be true or false")
+
+
 @dataclass(frozen=True)
 class Settings:
     apple_id: str
@@ -47,7 +56,7 @@ class Settings:
             apple_id=apple_id,
             app_password=app_password,
             bearer_token=_read(env, "MCP_BEARER_TOKEN"),
-            read_only=env.get("ICLOUD_MCP_READ_ONLY", "").strip().lower() in {"1", "true", "yes"},
+            read_only=_flag(env, "ICLOUD_MCP_READ_ONLY"),
             timezone=timezone,
             caldav_url=env.get("ICLOUD_CALDAV_URL") or DEFAULT_CALDAV_URL,
         )
