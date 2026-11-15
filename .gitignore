@@ -17,3 +17,5 @@ build/
 SPEC-*.md
 HANDOFF-*.md
 .DS_Store
+Session.vim
+.Session.vim
