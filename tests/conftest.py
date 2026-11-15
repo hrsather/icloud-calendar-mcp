@@ -11,6 +11,8 @@ from radicale import config as radicale_config
 from icloud_calendar_mcp.calendar import CalendarClient
 from icloud_calendar_mcp.config import Settings
 
+from .support import CREDENTIAL
+
 
 class _QuietHandler(WSGIRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
@@ -40,7 +42,7 @@ def radicale_url(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
 def settings(radicale_url: str) -> Settings:
     return Settings(
         apple_id="user@example.com",
-        app_password="app-password",
+        app_password=CREDENTIAL,
         timezone="Europe/London",
         caldav_url=radicale_url,
     )

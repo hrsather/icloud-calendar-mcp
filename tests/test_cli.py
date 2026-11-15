@@ -44,5 +44,5 @@ def test_sse_runs_uvicorn(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ICLOUD_APP_PASSWORD", "pw")
     monkeypatch.setenv("MCP_BEARER_TOKEN", "tok")
     monkeypatch.setattr(cli.uvicorn, "run", lambda app, **kw: calls.append(kw))
-    cli.main(["--transport", "sse", "--host", "0.0.0.0", "--port", "9000"])
-    assert calls == [{"host": "0.0.0.0", "port": 9000, "log_level": "warning"}]
+    cli.main(["--transport", "sse", "--host", "127.0.0.2", "--port", "9000"])
+    assert calls == [{"host": "127.0.0.2", "port": 9000, "log_level": "warning"}]

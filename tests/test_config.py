@@ -4,6 +4,8 @@ import pytest
 
 from icloud_calendar_mcp.config import ConfigError, Settings
 
+from .support import BEARER, CREDENTIAL
+
 
 def test_defaults() -> None:
     settings = Settings.from_env({"ICLOUD_APPLE_ID": "u@example.com", "ICLOUD_APP_PASSWORD": "pw"})
@@ -14,18 +16,19 @@ def test_defaults() -> None:
 
 
 def test_all_options() -> None:
+    bearer = "bearer-value"
     settings = Settings.from_env(
         {
             "ICLOUD_APPLE_ID": "u@example.com",
             "ICLOUD_APP_PASSWORD": "pw",
-            "MCP_BEARER_TOKEN": "tok",
+            "MCP_BEARER_TOKEN": bearer,
             "ICLOUD_MCP_READ_ONLY": "TRUE",
             "TZ": "Europe/London",
             "ICLOUD_MCP_TIMEZONE": "Asia/Tokyo",
         }
     )
     assert settings.read_only is True
-    assert settings.bearer_token == "tok"
+    assert settings.bearer_token == bearer
     assert settings.timezone == "Asia/Tokyo"
 
 
@@ -35,10 +38,11 @@ def test_tz_fallback() -> None:
 
 
 def test_file_variants(tmp_path: Path) -> None:
+    file_key, file_bearer = "key-from-file", "bearer-from-file"
     password = tmp_path / "password"
-    password.write_text("from-file\n")
+    password.write_text(f"{file_key}\n")
     token = tmp_path / "token"
-    token.write_text("tok-file\n")
+    token.write_text(f"{file_bearer}\n")
     settings = Settings.from_env(
         {
             "ICLOUD_APPLE_ID": "u@example.com",
@@ -46,8 +50,8 @@ def test_file_variants(tmp_path: Path) -> None:
             "MCP_BEARER_TOKEN_FILE": str(token),
         }
     )
-    assert settings.app_password == "from-file"
-    assert settings.bearer_token == "tok-file"
+    assert settings.app_password == file_key
+    assert settings.bearer_token == file_bearer
 
 
 def test_missing_file(tmp_path: Path) -> None:
@@ -76,6 +80,6 @@ def test_bad_timezone() -> None:
 
 
 def test_secrets_not_in_repr() -> None:
-    settings = Settings(apple_id="a", app_password="hunter2", bearer_token="tok123")
-    assert "hunter2" not in repr(settings)
-    assert "tok123" not in repr(settings)
+    settings = Settings(apple_id="a", app_password=CREDENTIAL, bearer_token=BEARER)
+    assert CREDENTIAL not in repr(settings)
+    assert BEARER not in repr(settings)

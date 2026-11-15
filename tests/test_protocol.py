@@ -1,19 +1,21 @@
 import os
 import socket
-import subprocess
 import sys
+import threading
 import time
 from collections.abc import Iterator
 
 import httpx
 import pytest
+import uvicorn
 from mcp.client import Client
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters
 
 from icloud_calendar_mcp.config import Settings
+from icloud_calendar_mcp.server import build_server, build_sse_app
 
-TOKEN = "test-token"
+from .support import BEARER
 
 
 def _env(settings: Settings, **extra: str) -> dict[str, str]:
@@ -36,12 +38,12 @@ def _free_port() -> int:
 @pytest.fixture
 def sse_url(settings: Settings, calendars: list[str]) -> Iterator[str]:
     port = _free_port()
-    process = subprocess.Popen(
-        [sys.executable, "-m", "icloud_calendar_mcp", "--transport", "sse", "--port", str(port)],
-        env=_env(settings, MCP_BEARER_TOKEN=TOKEN),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+    app = build_sse_app(build_server(settings), BEARER)
+    server = uvicorn.Server(
+        uvicorn.Config(app, host="127.0.0.1", port=port, log_level="error", lifespan="off")
     )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
     url = f"http://127.0.0.1:{port}/sse"
     try:
         for _ in range(100):
@@ -52,8 +54,8 @@ def sse_url(settings: Settings, calendars: list[str]) -> Iterator[str]:
                 time.sleep(0.1)
         yield url
     finally:
-        process.terminate()
-        process.wait(timeout=10)
+        server.should_exit = True
+        thread.join(timeout=10)
 
 
 async def test_stdio(settings: Settings, calendars: list[str]) -> None:
@@ -82,7 +84,7 @@ def test_sse_rejects_missing_and_wrong_token(sse_url: str) -> None:
 
 
 async def test_sse_with_token(sse_url: str) -> None:
-    transport = sse_client(sse_url, headers={"Authorization": f"Bearer {TOKEN}"})
+    transport = sse_client(sse_url, headers={"Authorization": f"Bearer {BEARER}"})
     async with Client(transport) as mcp:
         assert len((await mcp.list_tools()).tools) == 6
         created = await mcp.call_tool(

@@ -5,6 +5,8 @@ import pytest
 from icloud_calendar_mcp.calendar import CalendarClient, CalendarError, parse_when
 from icloud_calendar_mcp.config import Settings
 
+from .support import CREDENTIAL
+
 WEEK = ("2030-01-01", "2030-02-01")
 
 
@@ -141,7 +143,7 @@ def test_update_rejects_inverted_range(client: CalendarClient) -> None:
 
 def test_bad_credentials_and_unreachable_server(settings: Settings) -> None:
     unreachable = CalendarClient(
-        Settings(apple_id="a", app_password="b", caldav_url="http://127.0.0.1:1")
+        Settings(apple_id="a", app_password=CREDENTIAL, caldav_url="http://127.0.0.1:1")
     )
     with pytest.raises(CalendarError, match="cannot reach CalDAV server|CalDAV error"):
         unreachable.list_calendars()
